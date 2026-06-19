@@ -14,6 +14,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8080
 
+RUN rm -rf /usr/local/lib/node_modules/npm \
+    /usr/local/bin/npm \
+    /usr/local/bin/npx
+
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY app.js ./app.js
 COPY package*.json ./
