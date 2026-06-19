@@ -2,9 +2,9 @@ module "load_balancer_controller_irsa" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
   version = "6.6.1"
 
-  name            = local.load_balancer_controller_role_name
-  use_name_prefix = false
-
+  name                                   = local.load_balancer_controller_role_name
+  use_name_prefix                        = false
+  policy_name                            = "${var.project_name}-${var.environment}-AWS_Load_Balancer_Controller"
   attach_load_balancer_controller_policy = true
 
   oidc_providers = {
@@ -26,6 +26,7 @@ module "external_dns_irsa" {
 
   name            = local.external_dns_role_name
   use_name_prefix = false
+  policy_name     = "${var.project_name}-${var.environment}-External_DNS"
 
   attach_external_dns_policy    = true
   external_dns_hosted_zone_arns = [var.route53_zone_arn]
@@ -49,6 +50,7 @@ module "cluster_autoscaler_irsa" {
 
   name            = local.cluster_autoscaler_role_name
   use_name_prefix = false
+  policy_name     = "${var.project_name}-${var.environment}-Cluster_Autoscaler"
 
   attach_cluster_autoscaler_policy = true
   cluster_autoscaler_cluster_names = [var.cluster_name]
