@@ -1,8 +1,8 @@
 replicaCount: 3
 
 image:
-  repository: sample-nodejs
-  tag: local
+  repository: 430658514390.dkr.ecr.us-east-1.amazonaws.com/sample-nodejs
+  tag: v2
   pullPolicy: IfNotPresent
 
 nameOverride: ""
