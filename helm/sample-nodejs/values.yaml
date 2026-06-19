@@ -1,0 +1,62 @@
+replicaCount: 2
+
+image:
+  repository: sample-nodejs
+  tag: local
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+container:
+  port: 8080
+
+config:
+  nodeEnv: production
+  port: "8080"
+
+secret:
+  classifiedMessage: "classified"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+probes:
+  liveness:
+    path: /live
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:
+    path: /ready
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 3
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+ingress:
+  enabled: true
+  className: alb
+  host: dev.liamdevops.com
+  path: /my-app
+  pathType: Prefix
+  certificateArn: ""
+  scheme: internet-facing
+  targetType: ip

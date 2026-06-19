@@ -1,0 +1,21 @@
+clusterName: devops-k8s-task-dev-eks
+
+region: us-east-1
+
+vpcId: vpc-08d26fa3b60cf54d6
+
+serviceAccount:
+  create: true
+  name: aws-load-balancer-controller
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::430658514390:role/devops-k8s-task-dev-aws-lbc
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi

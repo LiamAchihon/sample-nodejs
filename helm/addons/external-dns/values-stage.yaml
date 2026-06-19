@@ -1,0 +1,32 @@
+provider:
+  name: aws
+
+policy: sync
+
+registry: txt
+
+txtOwnerId: devops-k8s-task-stage
+
+domainFilters:
+  - liamdevops.com
+
+extraArgs:
+  zone-id-filter: Z014604316OQBOIFW9IR7
+  aws-zone-type: public
+
+serviceAccount:
+  create: true
+  name: external-dns
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::430658514390:role/devops-k8s-task-stage-external-dns
+
+sources:
+  - ingress
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi

@@ -1,0 +1,15 @@
+replicas: 1
+
+args:
+  - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 100Mi
+  limits:
+    cpu: 200m
+    memory: 200Mi
+
+podDisruptionBudget:
+  enabled: false

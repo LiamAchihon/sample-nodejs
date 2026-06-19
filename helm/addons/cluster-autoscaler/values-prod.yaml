@@ -1,0 +1,24 @@
+autoDiscovery:
+  clusterName: devops-k8s-task-prod-eks
+
+awsRegion: us-east-1
+
+rbac:
+  serviceAccount:
+    create: true
+    name: cluster-autoscaler
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::430658514390:role/devops-k8s-task-prod-cluster-autoscaler
+
+extraArgs:
+  balance-similar-node-groups: "true"
+  skip-nodes-with-local-storage: "false"
+  skip-nodes-with-system-pods: "false"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 300Mi
+  limits:
+    cpu: 300m
+    memory: 600Mi
