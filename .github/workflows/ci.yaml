@@ -9,32 +9,33 @@ on:
       - main
   workflow_dispatch:
 
-permissions:
-  contents: write
-  id-token: write
-
 concurrency:
   group: ci-cd-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   AWS_REGION: us-east-1
-  AWS_ROLE_ARN: arn:aws:iam::430658514390:role/devops-k8s-task-shared-github-actions
+  BUILD_ROLE_ARN: arn:aws:iam::430658514390:role/devops-k8s-task-shared-github-actions
+  DEPLOY_ROLE_ARN: arn:aws:iam::430658514390:role/devops-k8s-task-shared-github-actions-deploy
   ECR_REGISTRY: 430658514390.dkr.ecr.us-east-1.amazonaws.com
   ECR_REPOSITORY: sample-nodejs
-  HELM_VALUES_FILE: helm/sample-nodejs/values-dev.yaml
 
 jobs:
-  ci-cd:
-    name: Build Scan and Deploy
+  build:
+    name: Build Scan and Push
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    permissions:
+      contents: read
+      id-token: write
+
+    outputs:
+      image_tag: ${{ steps.image.outputs.tag }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -52,8 +53,6 @@ jobs:
           curl -sfL \
             https://raw.githubusercontent.com/Bearer/bearer/main/contrib/install.sh \
             | sh -s -- -b /usr/local/bin
-
-          bearer version
 
       - name: Run SAST scan
         run: bearer scan . --severity critical
@@ -92,18 +91,18 @@ jobs:
             "sample-nodejs:${{ steps.image.outputs.tag }}"
 
       - name: Configure AWS credentials
-        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+        if: github.event_name == 'push'
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-to-assume: ${{ env.BUILD_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+        if: github.event_name == 'push'
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Push image to ECR
-        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+        if: github.event_name == 'push'
         run: |
           REMOTE_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}:${{ steps.image.outputs.tag }}"
 
@@ -113,54 +112,139 @@ jobs:
 
           docker push "${REMOTE_IMAGE}"
 
-      - name: Update Helm image tag
-        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+  deploy-dev:
+    name: Deploy Dev
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5.0.0
+        with:
+          version: v3.18.4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Dev
         run: |
-          sed -i \
-            "0,/^  tag: .*/s//  tag: ${{ steps.image.outputs.tag }}/" \
-            "${HELM_VALUES_FILE}"
+          ./scripts/deploy-environment.sh \
+            dev \
+            "${{ needs.build.outputs.image_tag }}"
 
-          grep -A3 "^image:" "${HELM_VALUES_FILE}"
+  deploy-stage:
+    name: Deploy Stage
+    needs:
+      - build
+      - deploy-dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
 
-      - name: Commit Helm tag
-        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5.0.0
+        with:
+          version: v3.18.4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Stage
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          ./scripts/deploy-environment.sh \
+            stage \
+            "${{ needs.build.outputs.image_tag }}"
 
-          git add "${HELM_VALUES_FILE}"
+  deploy-prod:
+    name: Deploy Prod
+    needs:
+      - build
+      - deploy-stage
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
 
-          if git diff --cached --quiet; then
-            echo "No Helm changes to commit."
-            exit 0
-          fi
+    permissions:
+      contents: write
+      id-token: write
 
-          git commit \
-            -m "chore(cd): deploy ${{ steps.image.outputs.tag }} to dev [skip ci]"
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
 
-          git push origin HEAD:main
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
 
-      - name: Smoke test
-        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5.0.0
+        with:
+          version: v3.18.4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Prod
         run: |
-          echo "Waiting for ArgoCD deployment..."
-          sleep 60
-
-          for attempt in {1..30}; do
-            STATUS=$(curl -sS \
-              -o /dev/null \
-              -w "%{http_code}" \
-              --max-time 10 \
-              https://dev.liamdevops.com/live || true)
-
-            if [ "${STATUS}" = "200" ]; then
-              echo "Smoke test passed."
-              exit 0
-            fi
-
-            echo "Attempt ${attempt}: HTTP ${STATUS}"
-            sleep 10
-          done
-
-          echo "Smoke test failed."
-          exit 1
+          ./scripts/deploy-environment.sh \
+            prod \
+            "${{ needs.build.outputs.image_tag }}"
