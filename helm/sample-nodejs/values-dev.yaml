@@ -52,7 +52,7 @@ ingress:
   enabled: true
   className: alb
   host: dev.liamdevops.com
-  path: /my-app
+  path: /
   pathType: Prefix
   certificateArn: ""
   scheme: internet-facing
