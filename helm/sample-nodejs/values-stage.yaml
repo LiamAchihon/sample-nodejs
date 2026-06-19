@@ -2,7 +2,7 @@ replicaCount: 2
 
 image:
   repository: 430658514390.dkr.ecr.us-east-1.amazonaws.com/sample-nodejs
-  tag: v2
+  tag: sha-d457d92
   pullPolicy: IfNotPresent
 
 nameOverride: ""
