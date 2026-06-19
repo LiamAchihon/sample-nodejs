@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD
 
 on:
   pull_request:
@@ -7,38 +7,45 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  id-token: write
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ROLE_ARN: arn:aws:iam::430658514390:role/devops-k8s-task-shared-github-actions
+  ECR_REGISTRY: 430658514390.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPOSITORY: sample-nodejs
+  HELM_VALUES_FILE: helm/sample-nodejs/values-dev.yaml
 
 jobs:
-  validate-build-scan:
-    name: Validate Build and Scan
+  ci-cd:
+    name: Build Scan and Deploy
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
-        run: |
-          git init
-          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          git fetch --depth=1 origin "${GITHUB_SHA}"
-          git checkout --detach FETCH_HEAD
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
-        run: |
-          source "$NVM_DIR/nvm.sh"
-          nvm install 22
-          nvm use 22
-          node --version
-          npm --version
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
       - name: Install dependencies
-        run: |
-          npm ci
+        run: npm ci
 
       - name: Check application syntax
-        run: |
-          node --check app.js
+        run: node --check app.js
 
       - name: Install Bearer
         run: |
@@ -49,14 +56,16 @@ jobs:
           bearer version
 
       - name: Run SAST scan
-        run: |
-          bearer scan . \
-            --severity critical
+        run: bearer scan . --severity critical
+
+      - name: Set image tag
+        id: image
+        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Build Docker image
         run: |
           docker build \
-            --tag sample-nodejs:${GITHUB_SHA} \
+            -t "sample-nodejs:${{ steps.image.outputs.tag }}" \
             .
 
       - name: Install Trivy
@@ -74,12 +83,84 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y trivy
 
-          trivy --version
-
       - name: Scan Docker image
         run: |
           trivy image \
             --severity HIGH,CRITICAL \
             --exit-code 1 \
             --ignore-unfixed \
-            sample-nodejs:${GITHUB_SHA}
+            "sample-nodejs:${{ steps.image.outputs.tag }}"
+
+      - name: Configure AWS credentials
+        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push image to ECR
+        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+        run: |
+          REMOTE_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}:${{ steps.image.outputs.tag }}"
+
+          docker tag \
+            "sample-nodejs:${{ steps.image.outputs.tag }}" \
+            "${REMOTE_IMAGE}"
+
+          docker push "${REMOTE_IMAGE}"
+
+      - name: Update Helm image tag
+        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+        run: |
+          sed -i \
+            "0,/^  tag: .*/s//  tag: ${{ steps.image.outputs.tag }}/" \
+            "${HELM_VALUES_FILE}"
+
+          grep -A3 "^image:" "${HELM_VALUES_FILE}"
+
+      - name: Commit Helm tag
+        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add "${HELM_VALUES_FILE}"
+
+          if git diff --cached --quiet; then
+            echo "No Helm changes to commit."
+            exit 0
+          fi
+
+          git commit \
+            -m "chore(cd): deploy ${{ steps.image.outputs.tag }} to dev [skip ci]"
+
+          git push origin HEAD:main
+
+      - name: Smoke test
+        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+        run: |
+          echo "Waiting for ArgoCD deployment..."
+          sleep 60
+
+          for attempt in {1..30}; do
+            STATUS=$(curl -sS \
+              -o /dev/null \
+              -w "%{http_code}" \
+              --max-time 10 \
+              https://dev.liamdevops.com/live || true)
+
+            if [ "${STATUS}" = "200" ]; then
+              echo "Smoke test passed."
+              exit 0
+            fi
+
+            echo "Attempt ${attempt}: HTTP ${STATUS}"
+            sleep 10
+          done
+
+          echo "Smoke test failed."
+          exit 1
