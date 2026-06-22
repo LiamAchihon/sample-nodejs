@@ -4,34 +4,48 @@ metadata:
   name: {{ include "sample-nodejs.fullname" . }}
   labels:
     {{- include "sample-nodejs.labels" . | nindent 4 }}
+
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
+
+  strategy:
+    type: {{ .Values.deploymentStrategy.type }}
+    rollingUpdate:
+      maxUnavailable: {{ .Values.deploymentStrategy.maxUnavailable }}
+      maxSurge: {{ .Values.deploymentStrategy.maxSurge }}
+
   selector:
     matchLabels:
       {{- include "sample-nodejs.selectorLabels" . | nindent 6 }}
+
   template:
     metadata:
       labels:
         {{- include "sample-nodejs.selectorLabels" . | nindent 8 }}
+
     spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
+
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+
           ports:
             - name: http
               containerPort: {{ .Values.container.port }}
               protocol: TCP
+
           envFrom:
             - configMapRef:
                 name: {{ include "sample-nodejs.fullname" . }}
+
           livenessProbe:
             httpGet:
               path: {{ .Values.probes.liveness.path }}
@@ -40,6 +54,7 @@ spec:
             periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
             timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
             failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+
           readinessProbe:
             httpGet:
               path: {{ .Values.probes.readiness.path }}
@@ -48,8 +63,10 @@ spec:
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
             timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
             failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

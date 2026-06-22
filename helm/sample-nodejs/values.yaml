@@ -1,5 +1,12 @@
 replicaCount: 2
 
+
+deploymentStrategy:
+  type: RollingUpdate
+  maxUnavailable: 0
+  maxSurge: 1
+
+  
 image:
   repository: sample-nodejs
   tag: local
