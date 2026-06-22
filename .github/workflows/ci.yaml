@@ -24,7 +24,7 @@ jobs:
   build:
     name: Build Scan and Push
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     permissions:
       contents: read
@@ -36,6 +36,65 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5.0.0
+        with:
+          version: v3.18.4
+
+      - name: Terraform format check
+        run: terraform fmt -check -recursive terraform
+
+      - name: Terraform validate
+        run: |
+          for dir in \
+            terraform/bootstrap \
+            terraform/shared \
+            terraform/environments/dev \
+            terraform/environments/stage \
+            terraform/environments/prod
+          do
+            echo "Validating ${dir}"
+
+            terraform -chdir="${dir}" init \
+              -backend=false \
+              -input=false
+
+            terraform -chdir="${dir}" validate
+          done
+
+      - name: Helm lint
+        run: |
+          helm lint helm/sample-nodejs \
+            -f helm/sample-nodejs/values-dev.yaml
+
+          helm lint helm/sample-nodejs \
+            -f helm/sample-nodejs/values-stage.yaml
+
+          helm lint helm/sample-nodejs \
+            -f helm/sample-nodejs/values-prod.yaml
+
+      - name: Helm template validation
+        run: |
+          helm template sample-nodejs-dev \
+            helm/sample-nodejs \
+            -f helm/sample-nodejs/values-dev.yaml \
+            --namespace dev > /dev/null
+
+          helm template sample-nodejs-stage \
+            helm/sample-nodejs \
+            -f helm/sample-nodejs/values-stage.yaml \
+            --namespace stage > /dev/null
+
+          helm template sample-nodejs-prod \
+            helm/sample-nodejs \
+            -f helm/sample-nodejs/values-prod.yaml \
+            --namespace prod > /dev/null
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -210,6 +269,7 @@ jobs:
       - deploy-stage
     runs-on: ubuntu-latest
     timeout-minutes: 45
+
     environment:
       name: production
       url: https://app.liamdevops.com
