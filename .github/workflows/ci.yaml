@@ -210,6 +210,9 @@ jobs:
       - deploy-stage
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment:
+      name: production
+      url: https://app.liamdevops.com
 
     permissions:
       contents: write

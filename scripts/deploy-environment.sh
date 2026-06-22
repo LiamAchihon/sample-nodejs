@@ -50,7 +50,8 @@ aws eks update-kubeconfig \
   --region us-east-1 \
   --name "${CLUSTER_NAME}"
 
-kubectl get nodes
+kubectl config current-context
+kubectl get nodes -o wide
 
 echo "=== Installing addons ==="
 
@@ -125,6 +126,42 @@ if [ "${SYNC_STATUS}" != "Synced" ] ||
   echo "ArgoCD deployment failed."
   exit 1
 fi
+echo "=== Kubernetes context ==="
+
+kubectl config current-context
+kubectl get nodes -o wide
+
+echo "=== Application resources: ${ENVIRONMENT} ==="
+
+kubectl get pods -n "${ENVIRONMENT}" -o wide
+kubectl get svc -n "${ENVIRONMENT}"
+kubectl get serviceaccount -n "${ENVIRONMENT}"
+kubectl get ingress -n "${ENVIRONMENT}"
+
+SERVICE_NAME="$(
+  kubectl get ingress \
+    -n "${ENVIRONMENT}" \
+    -o jsonpath='{.items[0].spec.rules[0].http.paths[0].backend.service.name}'
+)"
+
+echo "=== Service endpoints: ${SERVICE_NAME} ==="
+
+kubectl get endpoints "${SERVICE_NAME}" \
+  -n "${ENVIRONMENT}"
+
+echo "=== Cluster add-ons ==="
+
+kubectl get deployment metrics-server \
+  -n kube-system
+
+kubectl get deployment aws-load-balancer-controller \
+  -n kube-system
+
+kubectl get deployment cluster-autoscaler \
+  -n kube-system
+
+kubectl get deployment external-dns \
+  -n kube-system
 
 echo "=== Smoke test: ${DOMAIN} ==="
 
