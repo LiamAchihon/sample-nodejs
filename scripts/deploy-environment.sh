@@ -157,7 +157,7 @@ kubectl get deployment metrics-server \
 kubectl get deployment aws-load-balancer-controller \
   -n kube-system
 
-kubectl get deployment cluster-autoscaler \
+kubectl get deployment cluster-autoscaler-aws-cluster-autoscaler \
   -n kube-system
 
 kubectl get deployment external-dns \
