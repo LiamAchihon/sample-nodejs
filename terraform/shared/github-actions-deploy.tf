@@ -52,6 +52,19 @@ data "aws_iam_policy_document" "github_actions_deploy_iam" {
   }
 
   statement {
+    sid    = "GetEKSNodeGroupServiceRole"
+    effect = "Allow"
+
+    actions = [
+      "iam:GetRole"
+    ]
+
+    resources = [
+      "arn:aws:iam::${data.aws_caller_identity.deploy_current.account_id}:role/aws-service-role/eks-nodegroup.amazonaws.com/AWSServiceRoleForAmazonEKSNodegroup"
+    ]
+  }
+
+  statement {
     sid    = "PassProjectRoles"
     effect = "Allow"
 
@@ -109,6 +122,7 @@ data "aws_iam_policy_document" "github_actions_deploy_iam" {
 
       values = [
         "eks.amazonaws.com",
+        "eks-nodegroup.amazonaws.com",
         "elasticloadbalancing.amazonaws.com",
         "autoscaling.amazonaws.com",
         "spot.amazonaws.com"
