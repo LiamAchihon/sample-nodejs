@@ -229,12 +229,12 @@ jobs:
       - name: Smoke Test Dev - ALB
         run: |
           ALB_DNS=$(kubectl get ingress sample-nodejs-dev -n dev -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          curl -k --fail -H "Host: dev.liamdevops.com" https://${ALB_DNS}/live
+          curl --retry 18 --retry-delay 10 --retry-all-errors -k --fail -H "Host: dev.liamdevops.com" https://${ALB_DNS}/live
 
       - name: Smoke Test Dev - Domain
         run: |
           nslookup dev.liamdevops.com
-          curl --fail https://dev.liamdevops.com/live
+          curl --retry 18 --retry-delay 10 --retry-all-errors --fail https://dev.liamdevops.com/live
 
   deploy-stage:
     name: Deploy Stage
@@ -295,12 +295,12 @@ jobs:
       - name: Smoke Test Stage - ALB
         run: |
           ALB_DNS=$(kubectl get ingress sample-nodejs-stage -n stage -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          curl -k --fail -H "Host: stage.liamdevops.com" https://${ALB_DNS}/live
+          curl --retry 18 --retry-delay 10 --retry-all-errors -k --fail -H "Host: stage.liamdevops.com" https://${ALB_DNS}/live
 
       - name: Smoke Test Stage - Domain
         run: |
           nslookup stage.liamdevops.com
-          curl --fail https://stage.liamdevops.com/live
+          curl --retry 18 --retry-delay 10 --retry-all-errors --fail https://stage.liamdevops.com/live
 
   deploy-prod:
     name: Deploy Prod
@@ -365,9 +365,9 @@ jobs:
       - name: Smoke Test Prod - ALB
         run: |
           ALB_DNS=$(kubectl get ingress sample-nodejs-prod -n prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          curl -k --fail -H "Host: app.liamdevops.com" https://${ALB_DNS}/live
+          curl --retry 18 --retry-delay 10 --retry-all-errors -k --fail -H "Host: app.liamdevops.com" https://${ALB_DNS}/live
 
       - name: Smoke Test Prod - Domain
         run: |
           nslookup app.liamdevops.com
-          curl --fail https://app.liamdevops.com/live
+          curl --retry 18 --retry-delay 10 --retry-all-errors --fail https://app.liamdevops.com/live
