@@ -216,6 +216,26 @@ jobs:
             dev \
             "${{ needs.build.outputs.image_tag }}"
 
+      - name: Smoke Test Dev - Pod
+        run: |
+          kubectl exec deployment/sample-nodejs-dev -n dev -- \
+            wget -qO- http://localhost:8080/live
+
+      - name: Smoke Test Dev - Service
+        run: |
+          kubectl exec deployment/sample-nodejs-dev -n dev -- \
+            wget -qO- http://sample-nodejs-dev/live
+
+      - name: Smoke Test Dev - ALB
+        run: |
+          ALB_DNS=$(kubectl get ingress sample-nodejs-dev -n dev -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          curl -k --fail -H "Host: dev.liamdevops.com" https://${ALB_DNS}/live
+
+      - name: Smoke Test Dev - Domain
+        run: |
+          nslookup dev.liamdevops.com
+          curl --fail https://dev.liamdevops.com/live
+
   deploy-stage:
     name: Deploy Stage
     needs:
@@ -261,6 +281,26 @@ jobs:
           ./scripts/deploy-environment.sh \
             stage \
             "${{ needs.build.outputs.image_tag }}"
+
+      - name: Smoke Test Stage - Pod
+        run: |
+          kubectl exec deployment/sample-nodejs-stage -n stage -- \
+            wget -qO- http://localhost:8080/live
+
+      - name: Smoke Test Stage - Service
+        run: |
+          kubectl exec deployment/sample-nodejs-stage -n stage -- \
+            wget -qO- http://sample-nodejs-stage/live
+
+      - name: Smoke Test Stage - ALB
+        run: |
+          ALB_DNS=$(kubectl get ingress sample-nodejs-stage -n stage -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          curl -k --fail -H "Host: stage.liamdevops.com" https://${ALB_DNS}/live
+
+      - name: Smoke Test Stage - Domain
+        run: |
+          nslookup stage.liamdevops.com
+          curl --fail https://stage.liamdevops.com/live
 
   deploy-prod:
     name: Deploy Prod
@@ -311,3 +351,23 @@ jobs:
           ./scripts/deploy-environment.sh \
             prod \
             "${{ needs.build.outputs.image_tag }}"
+
+      - name: Smoke Test Prod - Pod
+        run: |
+          kubectl exec deployment/sample-nodejs-prod -n prod -- \
+            wget -qO- http://localhost:8080/live
+
+      - name: Smoke Test Prod - Service
+        run: |
+          kubectl exec deployment/sample-nodejs-prod -n prod -- \
+            wget -qO- http://sample-nodejs-prod/live
+
+      - name: Smoke Test Prod - ALB
+        run: |
+          ALB_DNS=$(kubectl get ingress sample-nodejs-prod -n prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          curl -k --fail -H "Host: app.liamdevops.com" https://${ALB_DNS}/live
+
+      - name: Smoke Test Prod - Domain
+        run: |
+          nslookup app.liamdevops.com
+          curl --fail https://app.liamdevops.com/live

@@ -67,3 +67,6 @@ ingress:
   certificateArn: ""
   scheme: internet-facing
   targetType: ip
+
+topologySpread:
+  enabled: false

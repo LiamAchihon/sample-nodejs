@@ -32,6 +32,16 @@ spec:
         runAsGroup: 1000
         fsGroup: 1000
 
+      {{- if .Values.topologySpread.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "sample-nodejs.selectorLabels" . | nindent 14 }}
+      {{- end }}
+
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"

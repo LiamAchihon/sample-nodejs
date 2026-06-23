@@ -162,27 +162,3 @@ kubectl get deployment cluster-autoscaler \
 
 kubectl get deployment external-dns \
   -n kube-system
-
-echo "=== Smoke test: ${DOMAIN} ==="
-
-for attempt in {1..30}; do
-  HTTP_STATUS="$(
-    curl -sS \
-      -o /dev/null \
-      -w "%{http_code}" \
-      --max-time 10 \
-      "https://${DOMAIN}/live" || true
-  )"
-
-  echo "Attempt ${attempt}: HTTP ${HTTP_STATUS}"
-
-  if [ "${HTTP_STATUS}" = "200" ]; then
-    echo "${ENVIRONMENT} smoke test passed."
-    exit 0
-  fi
-
-  sleep 10
-done
-
-echo "${ENVIRONMENT} smoke test failed."
-exit 1
