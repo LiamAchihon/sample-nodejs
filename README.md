@@ -173,3 +173,79 @@ bootstrap
 - Application running through the public domain
 - Kubernetes resources in the environment namespace
 - Production job waiting for approval
+
+
+---
+
+## Deployment Evidence
+
+### CI/CD Pipeline
+
+All pipeline stages completed successfully:
+
+![Pipeline Success](docs/screenshots/01-pipeline-all-green.png)
+
+### Production Manual Approval
+
+Production deployment is protected by a GitHub Environment approval:
+
+![Production Approval](docs/screenshots/02-production-approval.png)
+
+### Development Environment
+
+ArgoCD is Synced and Healthy, and the Kubernetes resources are running:
+
+![Dev Kubernetes Status](docs/screenshots/03-dev-kubernetes-status.png)
+
+Application access through Ingress:
+
+![Dev Browser](docs/screenshots/04-dev-browser-ingress.png)
+
+### Stage Environment
+
+ArgoCD is Synced and Healthy, and the Kubernetes resources are running:
+
+![Stage Kubernetes Status](docs/screenshots/05-stage-kubernetes-status.png)
+
+Application access through Ingress:
+
+![Stage Browser](docs/screenshots/06-stage-browser-ingress.png)
+
+### Production Environment
+
+ArgoCD is Synced and Healthy, and the Kubernetes resources are running:
+
+![Prod Kubernetes Status](docs/screenshots/07-prod-kubernetes-status.png)
+
+Production cluster add-ons:
+
+![Prod Add-ons](docs/screenshots/08-addons-prod-cluster.png)
+
+Application access through Ingress:
+
+![Prod Browser](docs/screenshots/09-prod-browser-ingress.png)
+
+---
+
+## Smoke Tests
+
+After every environment deployment, the pipeline validates:
+
+1. Pod health through `localhost:8080/live`.
+2. Service connectivity inside the cluster.
+3. ALB and Ingress connectivity.
+4. Public domain access through HTTPS.
+
+A failed smoke test stops the pipeline and prevents deployment to the next environment.
+
+---
+
+## Deployment Strategy
+
+The application uses a Kubernetes `Deployment` because it is stateless.
+
+Rolling updates are configured with:
+
+```yaml
+maxUnavailable: 0
+maxSurge: 1
