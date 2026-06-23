@@ -38,7 +38,8 @@ data "aws_iam_policy_document" "github_actions_assume_role" {
       variable = "token.actions.githubusercontent.com:sub"
 
       values = [
-        "repo:LiamAchihon/sample-nodejs:ref:refs/heads/main"
+        "repo:LiamAchihon/sample-nodejs:ref:refs/heads/main",
+        "repo:LiamAchihon/sample-nodejs:environment:production"
       ]
     }
   }
