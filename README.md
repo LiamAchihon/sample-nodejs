@@ -249,3 +249,22 @@ Rolling updates are configured with:
 ```yaml
 maxUnavailable: 0
 maxSurge: 1
+
+
+
+
+---
+
+## Reviewer Notes
+
+The live environments are deployed in a private AWS account.
+
+Kubernetes cluster credentials are not included in the repository. Deployment evidence is provided through the screenshots in `docs/screenshots`.
+
+To deploy the project in another AWS account, update the AWS account ID, IAM role ARNs, domain name, Terraform backend configuration, and GitHub OIDC repository conditions.
+
+Then deploy:
+
+1. `terraform/bootstrap`
+2. `terraform/shared`
+3. Run the CI/CD pipeline
