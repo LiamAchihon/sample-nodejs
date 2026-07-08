@@ -11,6 +11,10 @@ on:
       - "Dockerfile"
       - ".dockerignore"
       - ".github/workflows/ci.yaml"
+      - "helm/**"
+      - "terraform/**"
+      - "argocd/**"
+      - "scripts/**"
 
   push:
     branches:
