@@ -1,4 +1,4 @@
-replicaCount: 1
+replicaCount: 5
 
 image:
   repository: 430658514390.dkr.ecr.us-east-1.amazonaws.com/sample-nodejs
