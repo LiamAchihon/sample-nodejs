@@ -296,6 +296,16 @@ jobs:
       - name: Verify Dev Application
         if: github.event_name != 'pull_request'
         run: |
+          kubectl wait application sample-nodejs-dev \
+            -n argocd \
+            --for=jsonpath='{.status.sync.status}'=Synced \
+            --timeout=300s
+
+          kubectl wait application sample-nodejs-dev \
+            -n argocd \
+            --for=jsonpath='{.status.health.status}'=Healthy \
+            --timeout=300s
+
           kubectl get application sample-nodejs-dev -n argocd
 
       - name: Smoke Test Dev - Layers
@@ -384,6 +394,16 @@ jobs:
       - name: Verify Stage Application
         if: github.event_name != 'pull_request'
         run: |
+          kubectl wait application sample-nodejs-stage \
+            -n argocd \
+            --for=jsonpath='{.status.sync.status}'=Synced \
+            --timeout=300s
+
+          kubectl wait application sample-nodejs-stage \
+            -n argocd \
+            --for=jsonpath='{.status.health.status}'=Healthy \
+            --timeout=300s
+
           kubectl get application sample-nodejs-stage -n argocd
 
       - name: Smoke Test Stage - Layers
@@ -472,6 +492,16 @@ jobs:
       - name: Verify Prod Application
         if: github.event_name != 'pull_request'
         run: |
+          kubectl wait application sample-nodejs-prod \
+            -n argocd \
+            --for=jsonpath='{.status.sync.status}'=Synced \
+            --timeout=300s
+
+          kubectl wait application sample-nodejs-prod \
+            -n argocd \
+            --for=jsonpath='{.status.health.status}'=Healthy \
+            --timeout=300s
+
           kubectl get application sample-nodejs-prod -n argocd
 
       - name: Smoke Test Prod - Layers
