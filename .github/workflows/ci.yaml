@@ -332,7 +332,7 @@ jobs:
 
           echo ""
           echo "Smoke Test Layer 3 - ALB / Ingress Communication"
-          wget -qO- --header="Host: dev.liamdevops.com" http://$ALB_DNS/my-app
+          wget --tries=30 --waitretry=10 --timeout=10 -qO- --header="Host: dev.liamdevops.com" http://$ALB_DNS/my-app
 
           echo ""
           echo "Smoke Test Layer 4 - DNS To Application"
@@ -430,7 +430,7 @@ jobs:
 
           echo ""
           echo "Smoke Test Layer 3 - ALB / Ingress Communication"
-          wget -qO- --header="Host: stage.liamdevops.com" http://$ALB_DNS/my-app
+          wget --tries=30 --waitretry=10 --timeout=10 -qO- --header="Host: stage.liamdevops.com" http://$ALB_DNS/my-app
 
           echo ""
           echo "Smoke Test Layer 4 - DNS To Application"
@@ -528,7 +528,7 @@ jobs:
 
           echo ""
           echo "Smoke Test Layer 3 - ALB / Ingress Communication"
-          wget -qO- --header="Host: app.liamdevops.com" http://$ALB_DNS/my-app
+          wget --tries=30 --waitretry=10 --timeout=10 -qO- --header="Host: app.liamdevops.com" http://$ALB_DNS/my-app
 
           echo ""
           echo "Smoke Test Layer 4 - DNS To Application"
