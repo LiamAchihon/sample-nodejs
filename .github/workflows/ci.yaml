@@ -1,5 +1,4 @@
 name: CI/CD
-# trigger normal push pipeline
 
 on:
   pull_request:
@@ -52,8 +51,179 @@ env:
   ECR_REPOSITORY: sample-nodejs
 
 jobs:
+  terraform-bootstrap:
+    name: Terraform Bootstrap
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Apply Bootstrap
+        run: |
+          if aws s3api head-bucket --bucket devops-k8s-task-tfstate-430658514390 2>/dev/null; then
+            echo "Terraform state bucket already exists"
+            exit 0
+          fi
+
+          cd terraform/bootstrap
+          terraform init
+          terraform plan -out=bootstrap.tfplan
+          terraform apply -auto-approve bootstrap.tfplan
+
+  terraform-shared:
+    name: Terraform Shared
+    needs: terraform-bootstrap
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Apply Shared
+        run: |
+          cd terraform/shared
+          terraform init -reconfigure
+          terraform plan -out=shared.tfplan
+          terraform apply -auto-approve shared.tfplan
+
+  terraform-dev:
+    name: Terraform Dev
+    needs: terraform-shared
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Apply Dev
+        run: |
+          cd terraform/environments/dev
+          terraform init -reconfigure
+          terraform plan -out=dev.tfplan
+          terraform apply -auto-approve dev.tfplan
+
+  terraform-stage:
+    name: Terraform Stage
+    needs: terraform-dev
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Apply Stage
+        run: |
+          cd terraform/environments/stage
+          terraform init -reconfigure
+          terraform plan -out=stage.tfplan
+          terraform apply -auto-approve stage.tfplan
+
+  terraform-prod:
+    name: Terraform Prod
+    needs: terraform-stage
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Apply Prod
+        run: |
+          cd terraform/environments/prod
+          terraform init -reconfigure
+          terraform plan -out=prod.tfplan
+          terraform apply -auto-approve prod.tfplan
+
   build:
     name: Build Scan and Push
+    needs: terraform-prod
+    if: always() && (github.event_name == 'pull_request' || needs.terraform-prod.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -168,7 +338,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y wget gnupg
           wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          TRIVY_SOURCE="deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main"
+          echo "$TRIVY_SOURCE" | sudo tee /etc/apt/sources.list.d/trivy.list
           sudo apt-get update
           sudo apt-get install -y trivy
 
@@ -177,31 +348,31 @@ jobs:
           trivy image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed sample-nodejs:${{ steps.image.outputs.tag }}
 
       - name: Configure AWS Credentials
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.BUILD_ROLE_ARN }}
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to ECR
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         run: |
-          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 430658514390.dkr.ecr.us-east-1.amazonaws.com
+          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
 
       - name: Tag Docker Image
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         run: |
-          docker tag sample-nodejs:${{ steps.image.outputs.tag }} 430658514390.dkr.ecr.us-east-1.amazonaws.com/sample-nodejs:${{ steps.image.outputs.tag }}
+          docker tag sample-nodejs:${{ steps.image.outputs.tag }} $ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.image.outputs.tag }}
 
       - name: Push Image to ECR
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         run: |
-          docker push 430658514390.dkr.ecr.us-east-1.amazonaws.com/sample-nodejs:${{ steps.image.outputs.tag }}
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.image.outputs.tag }}
 
   deploy-dev:
     name: Deploy Dev
     needs: build
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -235,10 +406,11 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Update Dev Image Tag
         run: |
+          git pull --rebase origin main
           sed -i "s/tag:.*/tag: ${{ needs.build.outputs.image_tag }}/" helm/sample-nodejs/values-dev.yaml
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
@@ -248,7 +420,7 @@ jobs:
 
       - name: Connect to Dev Cluster
         run: |
-          aws eks update-kubeconfig --region us-east-1 --name devops-k8s-task-dev-eks
+          aws eks update-kubeconfig --region $AWS_REGION --name devops-k8s-task-dev-eks
           kubectl config current-context
           kubectl get nodes
 
@@ -313,7 +485,7 @@ jobs:
     needs:
       - build
       - deploy-dev
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -347,12 +519,12 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Update Stage Image Tag
         run: |
+          git pull --rebase origin main
           sed -i "s/tag:.*/tag: ${{ needs.build.outputs.image_tag }}/" helm/sample-nodejs/values-stage.yaml
-          git pull
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add helm/sample-nodejs/values-stage.yaml
@@ -361,7 +533,7 @@ jobs:
 
       - name: Connect to Stage Cluster
         run: |
-          aws eks update-kubeconfig --region us-east-1 --name devops-k8s-task-stage-eks
+          aws eks update-kubeconfig --region $AWS_REGION --name devops-k8s-task-stage-eks
           kubectl config current-context
           kubectl get nodes
 
@@ -426,7 +598,7 @@ jobs:
     needs:
       - build
       - deploy-stage
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -464,12 +636,12 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Update Prod Image Tag
         run: |
+          git pull --rebase origin main
           sed -i "s/tag:.*/tag: ${{ needs.build.outputs.image_tag }}/" helm/sample-nodejs/values-prod.yaml
-          git pull
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add helm/sample-nodejs/values-prod.yaml
@@ -478,7 +650,7 @@ jobs:
 
       - name: Connect to Prod Cluster
         run: |
-          aws eks update-kubeconfig --region us-east-1 --name devops-k8s-task-prod-eks
+          aws eks update-kubeconfig --region $AWS_REGION --name devops-k8s-task-prod-eks
           kubectl config current-context
           kubectl get nodes
 
