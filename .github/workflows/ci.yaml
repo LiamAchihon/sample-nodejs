@@ -28,6 +28,9 @@ on:
       - ".github/workflows/ci.yaml"
 
   workflow_dispatch:
+  permissions:
+  contents: read
+  id-token: write
 
 concurrency:
   group: ci-cd-${{ github.ref }}
