@@ -197,7 +197,7 @@ jobs:
         run: |
           cd terraform/shared
           terraform init -reconfigure
-          terraform plan -out=shared.tfplan
+          terraform plan -var="domain_name=liamdevops.com" -out=shared.tfplan
           terraform apply -auto-approve shared.tfplan
 
       - name: Configure AWS Credentials for ECR
