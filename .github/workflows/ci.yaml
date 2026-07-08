@@ -36,7 +36,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 concurrency:
@@ -51,192 +51,17 @@ env:
   ECR_REPOSITORY: sample-nodejs
 
 jobs:
-  terraform-bootstrap:
-    name: Terraform Bootstrap
-    if: github.event_name != 'pull_request'
+  pipeline:
+    name: Full CI/CD Pipeline
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    permissions:
-      contents: read
-      id-token: write
+    timeout-minutes: 360
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_wrapper: false
-
-      - name: Apply Bootstrap
-        run: |
-          if aws s3api head-bucket --bucket devops-k8s-task-tfstate-430658514390 2>/dev/null; then
-            echo "Terraform state bucket already exists"
-            exit 0
-          fi
-
-          cd terraform/bootstrap
-          terraform init
-          terraform plan -out=bootstrap.tfplan
-          terraform apply -auto-approve bootstrap.tfplan
-
-  terraform-shared:
-    name: Terraform Shared
-    needs: terraform-bootstrap
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    permissions:
-      contents: read
-      id-token: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_wrapper: false
-
-      - name: Apply Shared
-        run: |
-          cd terraform/shared
-          terraform init -reconfigure
-          terraform plan -out=shared.tfplan
-          terraform apply -auto-approve shared.tfplan
-
-  terraform-dev:
-    name: Terraform Dev
-    needs: terraform-shared
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-
-    permissions:
-      contents: read
-      id-token: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_wrapper: false
-
-      - name: Apply Dev
-        run: |
-          cd terraform/environments/dev
-          terraform init -reconfigure
-          terraform plan -out=dev.tfplan
-          terraform apply -auto-approve dev.tfplan
-
-  terraform-stage:
-    name: Terraform Stage
-    needs: terraform-dev
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-
-    permissions:
-      contents: read
-      id-token: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_wrapper: false
-
-      - name: Apply Stage
-        run: |
-          cd terraform/environments/stage
-          terraform init -reconfigure
-          terraform plan -out=stage.tfplan
-          terraform apply -auto-approve stage.tfplan
-
-  terraform-prod:
-    name: Terraform Prod
-    needs: terraform-stage
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-
-    permissions:
-      contents: read
-      id-token: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_wrapper: false
-
-      - name: Apply Prod
-        run: |
-          cd terraform/environments/prod
-          terraform init -reconfigure
-          terraform plan -out=prod.tfplan
-          terraform apply -auto-approve prod.tfplan
-
-  build:
-    name: Build Scan and Push
-    needs: terraform-prod
-    if: always() && (github.event_name == 'pull_request' || needs.terraform-prod.result == 'success')
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    permissions:
-      contents: read
-      id-token: write
-
-    outputs:
-      image_tag: ${{ steps.image.outputs.tag }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+          ref: main
+          fetch-depth: 0
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4
@@ -347,7 +172,35 @@ jobs:
         run: |
           trivy image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed sample-nodejs:${{ steps.image.outputs.tag }}
 
-      - name: Configure AWS Credentials
+      - name: Configure AWS Credentials for Terraform
+        if: github.event_name != 'pull_request'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Apply Bootstrap
+        if: github.event_name != 'pull_request'
+        run: |
+          if aws s3api head-bucket --bucket devops-k8s-task-tfstate-430658514390 2>/dev/null; then
+            echo "Terraform state bucket already exists"
+            exit 0
+          fi
+
+          cd terraform/bootstrap
+          terraform init
+          terraform plan -out=bootstrap.tfplan
+          terraform apply -auto-approve bootstrap.tfplan
+
+      - name: Apply Shared
+        if: github.event_name != 'pull_request'
+        run: |
+          cd terraform/shared
+          terraform init -reconfigure
+          terraform plan -out=shared.tfplan
+          terraform apply -auto-approve shared.tfplan
+
+      - name: Configure AWS Credentials for ECR
         if: github.event_name != 'pull_request'
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -369,88 +222,84 @@ jobs:
         run: |
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.image.outputs.tag }}
 
-  deploy-dev:
-    name: Deploy Dev
-    needs: build
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    permissions:
-      contents: write
-      id-token: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: main
-          fetch-depth: 0
-
       - name: Setup Kubectl
+        if: github.event_name != 'pull_request'
         uses: azure/setup-kubectl@v4
         with:
           version: latest
 
-      - name: Setup Helm
-        uses: azure/setup-helm@v5.0.0
-        with:
-          version: v3.18.4
-
       - name: Install Tools
+        if: github.event_name != 'pull_request'
         run: |
           sudo apt-get update
           sudo apt-get install -y dnsutils
 
-      - name: Configure AWS Credentials
+      - name: Configure AWS Credentials for Deploy
+        if: github.event_name != 'pull_request'
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Apply Dev
+        if: github.event_name != 'pull_request'
+        run: |
+          cd terraform/environments/dev
+          terraform init -reconfigure
+          terraform plan -out=dev.tfplan
+          terraform apply -auto-approve dev.tfplan
+
       - name: Update Dev Image Tag
+        if: github.event_name != 'pull_request'
         run: |
           git pull --rebase origin main
-          sed -i "s/tag:.*/tag: ${{ needs.build.outputs.image_tag }}/" helm/sample-nodejs/values-dev.yaml
+          sed -i "s/tag:.*/tag: ${{ steps.image.outputs.tag }}/" helm/sample-nodejs/values-dev.yaml
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add helm/sample-nodejs/values-dev.yaml
-          git commit -m "Deploy dev image ${{ needs.build.outputs.image_tag }} [skip ci]" || echo "No changes"
+          git commit -m "Deploy dev image ${{ steps.image.outputs.tag }} [skip ci]" || echo "No changes"
           git push
 
       - name: Connect to Dev Cluster
+        if: github.event_name != 'pull_request'
         run: |
           aws eks update-kubeconfig --region $AWS_REGION --name devops-k8s-task-dev-eks
           kubectl config current-context
           kubectl get nodes
 
       - name: Install Dev Addons
+        if: github.event_name != 'pull_request'
         run: |
           ./scripts/install-addons.sh dev
 
       - name: Verify Dev Addons
+        if: github.event_name != 'pull_request'
         run: |
           helm list -n kube-system
           kubectl get pods -n kube-system
 
       - name: Install ArgoCD Dev
+        if: github.event_name != 'pull_request'
         run: |
           ./scripts/install-argocd.sh dev
 
       - name: Verify ArgoCD Dev
+        if: github.event_name != 'pull_request'
         run: |
           kubectl get all -n argocd
 
       - name: Apply Dev Application
+        if: github.event_name != 'pull_request'
         run: |
           kubectl apply -f argocd/applications/sample-nodejs-dev.yaml
 
       - name: Verify Dev Application
+        if: github.event_name != 'pull_request'
         run: |
           kubectl get application sample-nodejs-dev -n argocd
-          kubectl get all -n dev
 
       - name: Smoke Test Dev - Layers
+        if: github.event_name != 'pull_request'
         run: |
           POD=$(kubectl get pods -n dev -l app.kubernetes.io/instance=sample-nodejs-dev -o jsonpath='{.items[0].metadata.name}')
           ALB_DNS=$(kubectl get ingress sample-nodejs-dev -n dev -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
@@ -480,90 +329,65 @@ jobs:
           nslookup dev.liamdevops.com
           wget -qO- http://dev.liamdevops.com/my-app
 
-  deploy-stage:
-    name: Deploy Stage
-    needs:
-      - build
-      - deploy-dev
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    permissions:
-      contents: write
-      id-token: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - name: Setup Kubectl
-        uses: azure/setup-kubectl@v4
-        with:
-          version: latest
-
-      - name: Setup Helm
-        uses: azure/setup-helm@v5.0.0
-        with:
-          version: v3.18.4
-
-      - name: Install Tools
+      - name: Apply Stage
+        if: github.event_name != 'pull_request'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y dnsutils
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          cd terraform/environments/stage
+          terraform init -reconfigure
+          terraform plan -out=stage.tfplan
+          terraform apply -auto-approve stage.tfplan
 
       - name: Update Stage Image Tag
+        if: github.event_name != 'pull_request'
         run: |
           git pull --rebase origin main
-          sed -i "s/tag:.*/tag: ${{ needs.build.outputs.image_tag }}/" helm/sample-nodejs/values-stage.yaml
+          sed -i "s/tag:.*/tag: ${{ steps.image.outputs.tag }}/" helm/sample-nodejs/values-stage.yaml
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add helm/sample-nodejs/values-stage.yaml
-          git commit -m "Deploy stage image ${{ needs.build.outputs.image_tag }} [skip ci]" || echo "No changes"
+          git commit -m "Deploy stage image ${{ steps.image.outputs.tag }} [skip ci]" || echo "No changes"
           git push
 
       - name: Connect to Stage Cluster
+        if: github.event_name != 'pull_request'
         run: |
           aws eks update-kubeconfig --region $AWS_REGION --name devops-k8s-task-stage-eks
           kubectl config current-context
           kubectl get nodes
 
       - name: Install Stage Addons
+        if: github.event_name != 'pull_request'
         run: |
           ./scripts/install-addons.sh stage
 
       - name: Verify Stage Addons
+        if: github.event_name != 'pull_request'
         run: |
           helm list -n kube-system
           kubectl get pods -n kube-system
 
       - name: Install ArgoCD Stage
+        if: github.event_name != 'pull_request'
         run: |
           ./scripts/install-argocd.sh stage
 
       - name: Verify ArgoCD Stage
+        if: github.event_name != 'pull_request'
         run: |
           kubectl get all -n argocd
 
       - name: Apply Stage Application
+        if: github.event_name != 'pull_request'
         run: |
           kubectl apply -f argocd/applications/sample-nodejs-stage.yaml
 
       - name: Verify Stage Application
+        if: github.event_name != 'pull_request'
         run: |
           kubectl get application sample-nodejs-stage -n argocd
-          kubectl get all -n stage
 
       - name: Smoke Test Stage - Layers
+        if: github.event_name != 'pull_request'
         run: |
           POD=$(kubectl get pods -n stage -l app.kubernetes.io/instance=sample-nodejs-stage -o jsonpath='{.items[0].metadata.name}')
           ALB_DNS=$(kubectl get ingress sample-nodejs-stage -n stage -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
@@ -593,94 +417,65 @@ jobs:
           nslookup stage.liamdevops.com
           wget -qO- http://stage.liamdevops.com/my-app
 
-  deploy-prod:
-    name: Deploy Prod
-    needs:
-      - build
-      - deploy-stage
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    environment:
-      name: production
-      url: https://app.liamdevops.com
-
-    permissions:
-      contents: write
-      id-token: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - name: Setup Kubectl
-        uses: azure/setup-kubectl@v4
-        with:
-          version: latest
-
-      - name: Setup Helm
-        uses: azure/setup-helm@v5.0.0
-        with:
-          version: v3.18.4
-
-      - name: Install Tools
+      - name: Apply Prod
+        if: github.event_name != 'pull_request'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y dnsutils
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          cd terraform/environments/prod
+          terraform init -reconfigure
+          terraform plan -out=prod.tfplan
+          terraform apply -auto-approve prod.tfplan
 
       - name: Update Prod Image Tag
+        if: github.event_name != 'pull_request'
         run: |
           git pull --rebase origin main
-          sed -i "s/tag:.*/tag: ${{ needs.build.outputs.image_tag }}/" helm/sample-nodejs/values-prod.yaml
+          sed -i "s/tag:.*/tag: ${{ steps.image.outputs.tag }}/" helm/sample-nodejs/values-prod.yaml
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add helm/sample-nodejs/values-prod.yaml
-          git commit -m "Deploy prod image ${{ needs.build.outputs.image_tag }} [skip ci]" || echo "No changes"
+          git commit -m "Deploy prod image ${{ steps.image.outputs.tag }} [skip ci]" || echo "No changes"
           git push
 
       - name: Connect to Prod Cluster
+        if: github.event_name != 'pull_request'
         run: |
           aws eks update-kubeconfig --region $AWS_REGION --name devops-k8s-task-prod-eks
           kubectl config current-context
           kubectl get nodes
 
       - name: Install Prod Addons
+        if: github.event_name != 'pull_request'
         run: |
           ./scripts/install-addons.sh prod
 
       - name: Verify Prod Addons
+        if: github.event_name != 'pull_request'
         run: |
           helm list -n kube-system
           kubectl get pods -n kube-system
 
       - name: Install ArgoCD Prod
+        if: github.event_name != 'pull_request'
         run: |
           ./scripts/install-argocd.sh prod
 
       - name: Verify ArgoCD Prod
+        if: github.event_name != 'pull_request'
         run: |
           kubectl get all -n argocd
 
       - name: Apply Prod Application
+        if: github.event_name != 'pull_request'
         run: |
           kubectl apply -f argocd/applications/sample-nodejs-prod.yaml
 
       - name: Verify Prod Application
+        if: github.event_name != 'pull_request'
         run: |
           kubectl get application sample-nodejs-prod -n argocd
-          kubectl get all -n prod
 
       - name: Smoke Test Prod - Layers
+        if: github.event_name != 'pull_request'
         run: |
           POD=$(kubectl get pods -n prod -l app.kubernetes.io/instance=sample-nodejs-prod -o jsonpath='{.items[0].metadata.name}')
           ALB_DNS=$(kubectl get ingress sample-nodejs-prod -n prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
