@@ -508,6 +508,12 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           POD=$(kubectl get pods -n prod -l app.kubernetes.io/instance=sample-nodejs-prod -o jsonpath='{.items[0].metadata.name}')
+
+          kubectl wait ingress sample-nodejs-prod \
+            -n prod \
+            --for=jsonpath='{.status.loadBalancer.ingress[0].hostname}' \
+            --timeout=300s
+
           ALB_DNS=$(kubectl get ingress sample-nodejs-prod -n prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
 
           echo ""
