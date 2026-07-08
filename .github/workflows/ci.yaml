@@ -4,9 +4,25 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - "app.js"
+      - "package.json"
+      - "package-lock.json"
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/ci.yaml"
+
   push:
     branches:
       - main
+    paths:
+      - "app.js"
+      - "package.json"
+      - "package-lock.json"
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/ci.yaml"
+
   workflow_dispatch:
 
 concurrency:
