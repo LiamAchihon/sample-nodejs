@@ -1,11 +1,13 @@
+---
 extends: default
 
 ignore: |
-  helm/**/templates/*.yaml
+  helm/sample-nodejs/templates/*.yaml
 
 rules:
   document-start: disable
   line-length:
-    max: 160
+    max: 180
     level: warning
-  truthy: disable
+  truthy:
+    allowed-values: ['true', 'false', 'on']
