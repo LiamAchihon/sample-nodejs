@@ -40,7 +40,7 @@ jobs:
   build:
     name: Build Scan and Push
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     permissions:
       contents: read
@@ -50,142 +50,138 @@ jobs:
       image_tag: ${{ steps.image.outputs.tag }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Terraform
+      - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4
         with:
           terraform_wrapper: false
 
-      - name: Set up Helm
+      - name: Setup Helm
         uses: azure/setup-helm@v5.0.0
         with:
           version: v3.18.4
 
-      - name: Terraform format check
-        run: terraform fmt -check -recursive terraform
-
-      - name: Terraform validate
+      - name: Install Yamllint
         run: |
-          for dir in \
-            terraform/bootstrap \
-            terraform/shared \
-            terraform/environments/dev \
-            terraform/environments/stage \
-            terraform/environments/prod
-          do
-            echo "Validating ${dir}"
+          sudo apt-get update
+          sudo apt-get install -y yamllint
 
-            terraform -chdir="${dir}" init \
-              -backend=false \
-              -input=false
-
-            terraform -chdir="${dir}" validate
-          done
-
-      - name: Helm lint
+      - name: Hadolint Dockerfile
         run: |
-          helm lint helm/sample-nodejs \
-            -f helm/sample-nodejs/values-dev.yaml
+          docker run --rm -i hadolint/hadolint < Dockerfile
 
-          helm lint helm/sample-nodejs \
-            -f helm/sample-nodejs/values-stage.yaml
-
-          helm lint helm/sample-nodejs \
-            -f helm/sample-nodejs/values-prod.yaml
-
-      - name: Helm template validation
+      - name: Helm Lint
         run: |
-          helm template sample-nodejs-dev \
-            helm/sample-nodejs \
-            -f helm/sample-nodejs/values-dev.yaml \
-            --namespace dev > /dev/null
+          helm lint helm/sample-nodejs -f helm/sample-nodejs/values-dev.yaml
+          helm lint helm/sample-nodejs -f helm/sample-nodejs/values-stage.yaml
+          helm lint helm/sample-nodejs -f helm/sample-nodejs/values-prod.yaml
 
-          helm template sample-nodejs-stage \
-            helm/sample-nodejs \
-            -f helm/sample-nodejs/values-stage.yaml \
-            --namespace stage > /dev/null
-
-          helm template sample-nodejs-prod \
-            helm/sample-nodejs \
-            -f helm/sample-nodejs/values-prod.yaml \
-            --namespace prod > /dev/null
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Check application syntax
-        run: node --check app.js
-
-      - name: Install Bearer
+      - name: Terraform Fmt Check
         run: |
-          curl -sfL \
-            https://raw.githubusercontent.com/Bearer/bearer/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin
+          terraform fmt -check -recursive terraform
 
-      - name: Run SAST scan
-        run: bearer scan . --severity critical
+      - name: Terraform Validate Bootstrap
+        run: |
+          cd terraform/bootstrap
+          terraform init -backend=false
+          terraform validate
 
-      - name: Set image tag
+      - name: Terraform Validate Shared
+        run: |
+          cd terraform/shared
+          terraform init -backend=false
+          terraform validate
+
+      - name: Terraform Validate Dev
+        run: |
+          cd terraform/environments/dev
+          terraform init -backend=false
+          terraform validate
+
+      - name: Terraform Validate Stage
+        run: |
+          cd terraform/environments/stage
+          terraform init -backend=false
+          terraform validate
+
+      - name: Terraform Validate Prod
+        run: |
+          cd terraform/environments/prod
+          terraform init -backend=false
+          terraform validate
+
+      - name: YAML Lint
+        run: |
+          yamllint helm
+          yamllint argocd
+          yamllint .github/workflows/ci.yaml
+
+      - name: Node Syntax Check
+        run: |
+          node --check app.js
+
+      - name: Dependency Scan
+        run: |
+          npm audit --audit-level=high
+
+      - name: IaC Security Scan
+        run: |
+          pip install checkov
+          checkov -d terraform
+
+      - name: Install Semgrep
+        run: |
+          python3 -m pip install semgrep
+
+      - name: SAST Scan
+        run: |
+          semgrep scan --config auto
+
+      - name: Set Image Tag
         id: image
-        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-
-      - name: Build Docker image
         run: |
-          docker build \
-            -t "sample-nodejs:${{ steps.image.outputs.tag }}" \
-            .
+          echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Docker Image
+        run: |
+          docker build -t sample-nodejs:${{ steps.image.outputs.tag }} .
 
       - name: Install Trivy
         run: |
           sudo apt-get update
           sudo apt-get install -y wget gnupg
-
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
-            | gpg --dearmor \
-            | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-
-          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
-            | sudo tee /etc/apt/sources.list.d/trivy.list
-
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" | sudo tee /etc/apt/sources.list.d/trivy.list
           sudo apt-get update
           sudo apt-get install -y trivy
 
-      - name: Scan Docker image
+      - name: Trivy Scan
         run: |
-          trivy image \
-            --severity HIGH,CRITICAL \
-            --exit-code 1 \
-            --ignore-unfixed \
-            "sample-nodejs:${{ steps.image.outputs.tag }}"
+          trivy image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed sample-nodejs:${{ steps.image.outputs.tag }}
 
-      - name: Configure AWS credentials
+      - name: Configure AWS Credentials
         if: github.event_name == 'push'
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.BUILD_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: us-east-1
 
-      - name: Login to Amazon ECR
-        if: github.event_name == 'push'
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Push image to ECR
+      - name: Login to ECR
         if: github.event_name == 'push'
         run: |
-          REMOTE_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}:${{ steps.image.outputs.tag }}"
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 430658514390.dkr.ecr.us-east-1.amazonaws.com
 
-          docker tag \
-            "sample-nodejs:${{ steps.image.outputs.tag }}" \
-            "${REMOTE_IMAGE}"
+      - name: Tag Docker Image
+        if: github.event_name == 'push'
+        run: |
+          docker tag sample-nodejs:${{ steps.image.outputs.tag }} 430658514390.dkr.ecr.us-east-1.amazonaws.com/sample-nodejs:${{ steps.image.outputs.tag }}
 
-          docker push "${REMOTE_IMAGE}"
+      - name: Push Image to ECR
+        if: github.event_name == 'push'
+        run: |
+          docker push 430658514390.dkr.ecr.us-east-1.amazonaws.com/sample-nodejs:${{ steps.image.outputs.tag }}
 
   deploy-dev:
     name: Deploy Dev
@@ -199,64 +195,110 @@ jobs:
       id-token: write
 
     steps:
-      - name: Checkout main
+      - name: Checkout
         uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_wrapper: false
-
-      - name: Set up kubectl
+      - name: Setup Kubectl
         uses: azure/setup-kubectl@v4
         with:
           version: latest
 
-      - name: Set up Helm
+      - name: Setup Helm
         uses: azure/setup-helm@v5.0.0
         with:
           version: v3.18.4
 
-      - name: Configure AWS credentials
+      - name: Install Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dnsutils
+
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: us-east-1
 
-      - name: Deploy Dev
+      - name: Update Dev Image Tag
         run: |
-          ./scripts/deploy-environment.sh \
-            dev \
-            "${{ needs.build.outputs.image_tag }}"
+          sed -i "s/tag:.*/tag: ${{ needs.build.outputs.image_tag }}/" helm/sample-nodejs/values-dev.yaml
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add helm/sample-nodejs/values-dev.yaml
+          git commit -m "Deploy dev image ${{ needs.build.outputs.image_tag }} [skip ci]" || echo "No changes"
+          git push
 
-      - name: Smoke Test Dev - Pod
+      - name: Connect to Dev Cluster
         run: |
-          kubectl exec deployment/sample-nodejs-dev -n dev -- \
-            wget -qO- http://localhost:8080/live
+          aws eks update-kubeconfig --region us-east-1 --name devops-k8s-task-dev-eks
+          kubectl config current-context
+          kubectl get nodes
 
-      - name: Smoke Test Dev - Service
+      - name: Install Dev Addons
         run: |
-          kubectl exec deployment/sample-nodejs-dev -n dev -- \
-            wget -qO- http://sample-nodejs-dev/live
+          ./scripts/install-addons.sh dev
 
-      - name: Smoke Test Dev - ALB
+      - name: Verify Dev Addons
         run: |
+          helm list -n kube-system
+          kubectl get pods -n kube-system
+
+      - name: Install ArgoCD Dev
+        run: |
+          ./scripts/install-argocd.sh dev
+
+      - name: Verify ArgoCD Dev
+        run: |
+          kubectl get all -n argocd
+
+      - name: Apply Dev Application
+        run: |
+          kubectl apply -f argocd/applications/sample-nodejs-dev.yaml
+
+      - name: Verify Dev Application
+        run: |
+          kubectl get application sample-nodejs-dev -n argocd
+          kubectl get all -n dev
+
+      - name: Smoke Test Dev - Layers
+        run: |
+          POD=$(kubectl get pods -n dev -l app.kubernetes.io/instance=sample-nodejs-dev -o jsonpath='{.items[0].metadata.name}')
           ALB_DNS=$(kubectl get ingress sample-nodejs-dev -n dev -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          curl --retry 18 --retry-delay 10 --retry-all-errors -k --fail -H "Host: dev.liamdevops.com" https://${ALB_DNS}/live
 
-      - name: Smoke Test Dev - Domain
-        run: |
+          echo ""
+          echo "Readiness Probe Test"
+          kubectl exec -n dev $POD -- wget -qO- localhost:8080/ready
+
+          echo ""
+          echo "Liveness Probe Test"
+          kubectl exec -n dev $POD -- wget -qO- localhost:8080/live
+
+          echo ""
+          echo "Smoke Test Layer 1 - Application Inside Pod"
+          kubectl exec -n dev $POD -- wget -qO- localhost:8080/my-app
+
+          echo ""
+          echo "Smoke Test Layer 2 - Service To Pod Communication"
+          kubectl exec -n dev $POD -- wget -qO- sample-nodejs-dev:80/my-app
+
+          echo ""
+          echo "Smoke Test Layer 3 - ALB / Ingress Communication"
+          wget -qO- --header="Host: dev.liamdevops.com" http://$ALB_DNS/my-app
+
+          echo ""
+          echo "Smoke Test Layer 4 - DNS To Application"
           nslookup dev.liamdevops.com
-          curl --retry 18 --retry-delay 10 --retry-all-errors --fail https://dev.liamdevops.com/live
+          wget -qO- http://dev.liamdevops.com/my-app
 
   deploy-stage:
     name: Deploy Stage
     needs:
       - build
       - deploy-dev
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -265,64 +307,111 @@ jobs:
       id-token: write
 
     steps:
-      - name: Checkout main
+      - name: Checkout
         uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_wrapper: false
-
-      - name: Set up kubectl
+      - name: Setup Kubectl
         uses: azure/setup-kubectl@v4
         with:
           version: latest
 
-      - name: Set up Helm
+      - name: Setup Helm
         uses: azure/setup-helm@v5.0.0
         with:
           version: v3.18.4
 
-      - name: Configure AWS credentials
+      - name: Install Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dnsutils
+
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: us-east-1
 
-      - name: Deploy Stage
+      - name: Update Stage Image Tag
         run: |
-          ./scripts/deploy-environment.sh \
-            stage \
-            "${{ needs.build.outputs.image_tag }}"
+          sed -i "s/tag:.*/tag: ${{ needs.build.outputs.image_tag }}/" helm/sample-nodejs/values-stage.yaml
+          git pull
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add helm/sample-nodejs/values-stage.yaml
+          git commit -m "Deploy stage image ${{ needs.build.outputs.image_tag }} [skip ci]" || echo "No changes"
+          git push
 
-      - name: Smoke Test Stage - Pod
+      - name: Connect to Stage Cluster
         run: |
-          kubectl exec deployment/sample-nodejs-stage -n stage -- \
-            wget -qO- http://localhost:8080/live
+          aws eks update-kubeconfig --region us-east-1 --name devops-k8s-task-stage-eks
+          kubectl config current-context
+          kubectl get nodes
 
-      - name: Smoke Test Stage - Service
+      - name: Install Stage Addons
         run: |
-          kubectl exec deployment/sample-nodejs-stage -n stage -- \
-            wget -qO- http://sample-nodejs-stage/live
+          ./scripts/install-addons.sh stage
 
-      - name: Smoke Test Stage - ALB
+      - name: Verify Stage Addons
         run: |
+          helm list -n kube-system
+          kubectl get pods -n kube-system
+
+      - name: Install ArgoCD Stage
+        run: |
+          ./scripts/install-argocd.sh stage
+
+      - name: Verify ArgoCD Stage
+        run: |
+          kubectl get all -n argocd
+
+      - name: Apply Stage Application
+        run: |
+          kubectl apply -f argocd/applications/sample-nodejs-stage.yaml
+
+      - name: Verify Stage Application
+        run: |
+          kubectl get application sample-nodejs-stage -n argocd
+          kubectl get all -n stage
+
+      - name: Smoke Test Stage - Layers
+        run: |
+          POD=$(kubectl get pods -n stage -l app.kubernetes.io/instance=sample-nodejs-stage -o jsonpath='{.items[0].metadata.name}')
           ALB_DNS=$(kubectl get ingress sample-nodejs-stage -n stage -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          curl --retry 18 --retry-delay 10 --retry-all-errors -k --fail -H "Host: stage.liamdevops.com" https://${ALB_DNS}/live
 
-      - name: Smoke Test Stage - Domain
-        run: |
+          echo ""
+          echo "Readiness Probe Test"
+          kubectl exec -n stage $POD -- wget -qO- localhost:8080/ready
+
+          echo ""
+          echo "Liveness Probe Test"
+          kubectl exec -n stage $POD -- wget -qO- localhost:8080/live
+
+          echo ""
+          echo "Smoke Test Layer 1 - Application Inside Pod"
+          kubectl exec -n stage $POD -- wget -qO- localhost:8080/my-app
+
+          echo ""
+          echo "Smoke Test Layer 2 - Service To Pod Communication"
+          kubectl exec -n stage $POD -- wget -qO- sample-nodejs-stage:80/my-app
+
+          echo ""
+          echo "Smoke Test Layer 3 - ALB / Ingress Communication"
+          wget -qO- --header="Host: stage.liamdevops.com" http://$ALB_DNS/my-app
+
+          echo ""
+          echo "Smoke Test Layer 4 - DNS To Application"
           nslookup stage.liamdevops.com
-          curl --retry 18 --retry-delay 10 --retry-all-errors --fail https://stage.liamdevops.com/live
+          wget -qO- http://stage.liamdevops.com/my-app
 
   deploy-prod:
     name: Deploy Prod
     needs:
       - build
       - deploy-stage
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -335,55 +424,101 @@ jobs:
       id-token: write
 
     steps:
-      - name: Checkout main
+      - name: Checkout
         uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_wrapper: false
-
-      - name: Set up kubectl
+      - name: Setup Kubectl
         uses: azure/setup-kubectl@v4
         with:
           version: latest
 
-      - name: Set up Helm
+      - name: Setup Helm
         uses: azure/setup-helm@v5.0.0
         with:
           version: v3.18.4
 
-      - name: Configure AWS credentials
+      - name: Install Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dnsutils
+
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: us-east-1
 
-      - name: Deploy Prod
+      - name: Update Prod Image Tag
         run: |
-          ./scripts/deploy-environment.sh \
-            prod \
-            "${{ needs.build.outputs.image_tag }}"
+          sed -i "s/tag:.*/tag: ${{ needs.build.outputs.image_tag }}/" helm/sample-nodejs/values-prod.yaml
+          git pull
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add helm/sample-nodejs/values-prod.yaml
+          git commit -m "Deploy prod image ${{ needs.build.outputs.image_tag }} [skip ci]" || echo "No changes"
+          git push
 
-      - name: Smoke Test Prod - Pod
+      - name: Connect to Prod Cluster
         run: |
-          kubectl exec deployment/sample-nodejs-prod -n prod -- \
-            wget -qO- http://localhost:8080/live
+          aws eks update-kubeconfig --region us-east-1 --name devops-k8s-task-prod-eks
+          kubectl config current-context
+          kubectl get nodes
 
-      - name: Smoke Test Prod - Service
+      - name: Install Prod Addons
         run: |
-          kubectl exec deployment/sample-nodejs-prod -n prod -- \
-            wget -qO- http://sample-nodejs-prod/live
+          ./scripts/install-addons.sh prod
 
-      - name: Smoke Test Prod - ALB
+      - name: Verify Prod Addons
         run: |
+          helm list -n kube-system
+          kubectl get pods -n kube-system
+
+      - name: Install ArgoCD Prod
+        run: |
+          ./scripts/install-argocd.sh prod
+
+      - name: Verify ArgoCD Prod
+        run: |
+          kubectl get all -n argocd
+
+      - name: Apply Prod Application
+        run: |
+          kubectl apply -f argocd/applications/sample-nodejs-prod.yaml
+
+      - name: Verify Prod Application
+        run: |
+          kubectl get application sample-nodejs-prod -n argocd
+          kubectl get all -n prod
+
+      - name: Smoke Test Prod - Layers
+        run: |
+          POD=$(kubectl get pods -n prod -l app.kubernetes.io/instance=sample-nodejs-prod -o jsonpath='{.items[0].metadata.name}')
           ALB_DNS=$(kubectl get ingress sample-nodejs-prod -n prod -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          curl --retry 18 --retry-delay 10 --retry-all-errors -k --fail -H "Host: app.liamdevops.com" https://${ALB_DNS}/live
 
-      - name: Smoke Test Prod - Domain
-        run: |
+          echo ""
+          echo "Readiness Probe Test"
+          kubectl exec -n prod $POD -- wget -qO- localhost:8080/ready
+
+          echo ""
+          echo "Liveness Probe Test"
+          kubectl exec -n prod $POD -- wget -qO- localhost:8080/live
+
+          echo ""
+          echo "Smoke Test Layer 1 - Application Inside Pod"
+          kubectl exec -n prod $POD -- wget -qO- localhost:8080/my-app
+
+          echo ""
+          echo "Smoke Test Layer 2 - Service To Pod Communication"
+          kubectl exec -n prod $POD -- wget -qO- sample-nodejs-prod:80/my-app
+
+          echo ""
+          echo "Smoke Test Layer 3 - ALB / Ingress Communication"
+          wget -qO- --header="Host: app.liamdevops.com" http://$ALB_DNS/my-app
+
+          echo ""
+          echo "Smoke Test Layer 4 - DNS To Application"
           nslookup app.liamdevops.com
-          curl --retry 18 --retry-delay 10 --retry-all-errors --fail https://app.liamdevops.com/live
+          wget -qO- http://app.liamdevops.com/my-app
