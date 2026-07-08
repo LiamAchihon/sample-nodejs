@@ -1,4 +1,4 @@
-replicaCount: 3
+replicaCount: 1
 
 image:
   repository: 430658514390.dkr.ecr.us-east-1.amazonaws.com/sample-nodejs
@@ -44,7 +44,7 @@ probes:
 
 autoscaling:
   enabled: true
-  minReplicas: 3
+  minReplicas: 1
   maxReplicas: 5
   targetCPUUtilizationPercentage: 70
 
